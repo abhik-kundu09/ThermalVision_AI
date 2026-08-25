@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Environment Variables
+.env
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS Artifacts
+.DS_Store
+Thumbs.db
+
+# Logs & Temp
+*.log
+scratch/
+
+# ML model checkpoints
+checkpoints/
+*.pth
+*.pt
+
+# Reports & Project State
+PROJECT_STATE.md
+PROJECT_STATE*
+REPORT.md
+REPORT*

@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ThermalVision AI — Landsat Thermal IR to True-Color RGB Translation</title>
+  <meta name="description" content="ThermalVision AI: Deep Learning Remote Sensing System translating Landsat Collection 2 Thermal Infrared imagery into True-Color Visible RGB via Pix2Pix Conditional GAN.">
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Top Navigation -->
+  <header class="site-header" id="siteHeader">
+    <div class="nav-container">
+      <a href="#" class="brand-logo" aria-label="ThermalVision AI Home">
+        <span class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M12 2a7 7 0 0 0 7 7c0 5-7 13-7 13S5 14 5 9a7 7 0 0 1 7-7z"></path>
+          </svg>
+        </span>
+        <span class="brand-name">ThermalVision AI</span>
+      </a>
+
+      <nav class="nav-links" aria-label="Primary Navigation">
+        <a href="#workspaceSection" class="nav-link">Workspace</a>
+        <a href="#howItWorks" class="nav-link">Architecture</a>
+        <a href="#gallerySection" class="nav-link">Landsat Gallery</a>
+        <a href="#techDetails" class="nav-link">Metrics & Models</a>
+      </nav>
+
+      <div class="nav-actions">
+        <div class="status-indicator" id="systemStatusBadge" title="Backend connection status">
+          <span class="status-dot"></span>
+          <span class="status-text" id="statusProviderText">Pix2Pix Ready</span>
+        </div>
+        <a href="#uploadCard" class="btn btn-nav-cta">
+          <i class="fa-solid fa-satellite"></i>
+          <span>Translate</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="hero-container">
+      <div class="hero-content">
+        <div class="hero-tag">
+          <span class="tag-pill">Landsat 8/9 Level-2</span>
+          <span class="tag-text">Thermal Band 10 &rarr; Visible RGB Bands 4,3,2</span>
+        </div>
+        
+        <h1 class="hero-title">Translate thermal heat into living color.</h1>
+        
+        <p class="hero-subtitle">
+          Transform Landsat surface temperature infrared imagery into true-color visible representations using an 8-layer U-Net Pix2Pix conditional GAN with seamless 2D Hann sliding-window inference.
+        </p>
+
+        <div class="hero-cta-group">
+          <a href="#uploadCard" class="btn btn-primary btn-large" id="heroUploadBtn">
+            <i class="fa-solid fa-arrow-up-from-bracket"></i>
+            <span>Upload Thermal Scene</span>
+          </a>
+          <a href="#gallerySection" class="btn btn-secondary btn-large">
+            <i class="fa-regular fa-compass"></i>
+            <span>Inspect Benchmark Scenes</span>
+          </a>
+        </div>
+
+        <div class="hero-feature-pills">
+          <span class="pill-item"><i class="fa-solid fa-check"></i> USGS C2 Calibration</span>
+          <span class="pill-item"><i class="fa-solid fa-check"></i> Pix2Pix U-Net Generator</span>
+          <span class="pill-item"><i class="fa-solid fa-check"></i> Seamless 2D Hann Tiling</span>
+        </div>
+      </div>
+
+      <div class="hero-visual">
+        <div class="hero-collage">
+          <div class="collage-card card-main">
+            <div class="collage-badge">Enhanced Preview</div>
+            <img src="/api/sample-images/01_nocturnal_surveillance.png" alt="Thermal sample preview" id="heroPreviewImg">
+            <div class="collage-caption">
+              <span class="caption-title">Night Surveillance</span>
+              <span class="caption-sub">LWIR &bull; Enhanced Contrast</span>
+            </div>
+          </div>
+          <div class="collage-card card-floating">
+            <div class="floating-stat">
+              <span class="stat-num">+148%</span>
+              <span class="stat-lbl">Sharpness Gain</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Workspace / Upload / Comparison Section -->
+  <section class="workspace-section" id="workspaceSection">
+    <div class="section-container">
+      
+      <!-- Section Header -->
+      <div class="section-header-compact">
+        <span class="section-kicker">Interactive Workspace</span>
+        <h2 class="section-heading">Enhance &amp; Compare</h2>
+        <p class="section-desc">Drop a thermal capture below to enhance contrast and reveal hidden details.</p>
+      </div>
+
+      <div class="workspace-layout">
+        
+        <!-- Left: Upload & Controls Card -->
+        <div class="workspace-sidebar">
+          
+          <!-- Visual Upload Card -->
+          <div class="upload-card" id="uploadCard">
+            <div class="upload-card-header">
+              <h3 class="card-title">Select Thermal Image</h3>
+              <span class="card-subtitle">JPG, PNG, or TIFF up to 15MB</span>
+            </div>
+
+            <!-- Dropzone -->
+            <div class="visual-dropzone" id="dropzone" tabindex="0" role="button" aria-label="Drop thermal image here or click to browse">
+              <input type="file" id="fileInput" accept="image/jpeg,image/png,image/tiff,image/bmp,image/webp" hidden>
+              
+              <div class="dropzone-idle" id="dropzonePrompt">
+                <div class="dropzone-icon-bubble">
+                  <i class="fa-solid fa-cloud-arrow-up"></i>
+                </div>
+                <p class="dropzone-title">Drop an image here</p>
+                <p class="dropzone-subtitle">or <span class="text-link">browse from device</span></p>
+                <div class="format-badges">
+                  <span>JPG</span>
+                  <span>PNG</span>
+                  <span>TIFF</span>
+                </div>
+              </div>
+
+              <!-- Selected File Preview -->
+              <div class="file-loaded-view hidden" id="filePreviewCard">
+                <div class="thumb-wrapper">
+                  <img id="filePreviewImg" alt="Selected thermal thumbnail" src="">
+                </div>
+                <div class="file-metadata">
+                  <div class="loaded-filename" id="previewFileName">filename.png</div>
+                  <div class="loaded-specs" id="previewFileMeta">640 &times; 480 &bull; 245 KB</div>
+                </div>
+                <button type="button" class="btn-icon-clear" id="removeFileBtn" title="Remove selected image" aria-label="Remove image">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Action Button -->
+            <button type="button" class="btn btn-primary btn-block btn-process" id="processBtn" disabled>
+              <i class="fa-solid fa-wand-magic-sparkles"></i>
+              <span>Enhance Image</span>
+            </button>
+
+            <!-- Quick Sample Picker -->
+            <div class="quick-samples-box">
+              <div class="quick-samples-label">Or choose a benchmark Landsat dataset:</div>
+              <div class="quick-sample-chips" id="quickSampleChips">
+                <button type="button" class="sample-chip active" data-id="01_landsat_urban_heat_island" data-filename="01_nocturnal_surveillance.png">
+                  <span>Landsat Urban Heat</span>
+                </button>
+                <button type="button" class="sample-chip" data-id="02_agricultural_canopy_water_stress" data-filename="02_electrical_substation_hotspot.png">
+                  <span>Agricultural Canopy</span>
+                </button>
+                <button type="button" class="sample-chip" data-id="03_coastal_estuary_thermal_plume" data-filename="03_wildlife_canopy_recon.png">
+                  <span>Coastal Estuary</span>
+                </button>
+                <button type="button" class="sample-chip" data-id="04_geothermal_volcanic_caldera" data-filename="04_building_heat_loss.png">
+                  <span>Volcanic Caldera</span>
+                </button>
+                <button type="button" class="sample-chip" data-id="05_uav_airborne_thermal_recon" data-filename="05_uav_convoy_recon.png">
+                  <span>Aerial Recon</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- AI Model Switcher — always visible -->
+            <div class="model-switcher-bar">
+              <span class="model-switcher-label">
+                <i class="fa-solid fa-microchip"></i> AI Model
+              </span>
+              <div class="model-pills" role="group" aria-label="Select AI colorization model">
+                <button type="button" class="model-pill active" data-provider="pytorch_pix2pix" title="Local PyTorch U-Net — runs offline">
+                  <i class="fa-solid fa-brain"></i> Pix2Pix
+                </button>
+                <button type="button" class="model-pill" data-provider="local" title="Local colormap — fastest, no AI">
+                  <i class="fa-solid fa-palette"></i> Colormap
+                </button>
+              </div>
+            </div>
+
+            <!-- Optional Image Tuning Drawer -->
+            <div class="tuning-drawer">
+              <button type="button" class="tuning-toggle-btn" id="tuningToggleBtn" aria-expanded="false">
+                <span>Fine-tune Parameters</span>
+                <i class="fa-solid fa-chevron-down" id="tuningChevron"></i>
+              </button>
+              
+              <div class="tuning-content hidden" id="tuningContent">
+                <div class="control-group">
+                  <div class="control-label-row">
+                    <label for="claheClipSlider">Contrast Clip Limit</label>
+                    <span class="control-val" id="claheClipVal">3.0</span>
+                  </div>
+                  <input type="range" id="claheClipSlider" min="1.0" max="6.0" step="0.5" value="3.0">
+                  <span class="control-hint">Controls local contrast amplification</span>
+                </div>
+
+                <div class="control-group">
+                  <div class="control-label-row">
+                    <label for="bilateralDSlider">Denoising Strength</label>
+                    <span class="control-val" id="bilateralDVal">9</span>
+                  </div>
+                  <input type="range" id="bilateralDSlider" min="3" max="15" step="2" value="9">
+                  <span class="control-hint">Removes thermal sensor noise while preserving edges</span>
+                </div>
+
+                <div class="control-group">
+                  <div class="control-label-row">
+                    <label for="unsharpAmountSlider">Detail Sharpening</label>
+                    <span class="control-val" id="unsharpAmountVal">1.2</span>
+                  </div>
+                  <input type="range" id="unsharpAmountSlider" min="0.0" max="2.5" step="0.1" value="1.2">
+                  <span class="control-hint">Enhances high-frequency thermal transitions</span>
+                </div>
+
+                <div class="control-group">
+                  <label for="providerSelect">Translation Engine (synced with model switcher above)</label>
+                  <select id="providerSelect" class="form-select">
+                    <option value="pytorch_pix2pix" selected>PyTorch Pix2Pix (Trained U-Net Generator)</option>
+                    <option value="local">Local Radiometric Synthesis (Colormap)</option>
+                  </select>
+                </div>
+
+                <button type="button" class="btn btn-subtle btn-sm btn-block" id="resetParamsBtn">
+                  <i class="fa-solid fa-rotate-left"></i> Reset to Defaults
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Right: Interactive Viewer / Comparison Workspace -->
+        <div class="workspace-viewer">
+          
+          <div class="viewer-card">
+            
+            <!-- Viewer Toolbar -->
+            <div class="viewer-toolbar">
+              <div class="view-mode-tabs" role="tablist">
+                <button type="button" class="tab-btn active" id="tabSplit" role="tab" aria-selected="true">
+                  <i class="fa-solid fa-grip-lines-vertical"></i>
+                  <span>Split Slider</span>
+                </button>
+                <button type="button" class="tab-btn" id="tabSideBySide" role="tab" aria-selected="false">
+                  <i class="fa-solid fa-table-columns"></i>
+                  <span>Side by Side</span>
+                </button>
+                <button type="button" class="tab-btn" id="tabPipeline" role="tab" aria-selected="false">
+                  <i class="fa-solid fa-layer-group"></i>
+                  <span>Pipeline Steps</span>
+                </button>
+              </div>
+
+              <div class="viewer-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="downloadBtn" disabled title="Download enhanced image">
+                  <i class="fa-solid fa-download"></i>
+                  <span>Download</span>
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="fullscreenBtn" disabled title="Toggle full view">
+                  <i class="fa-solid fa-expand"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Main Canvas Viewport -->
+            <div class="viewer-viewport" id="viewerViewport">
+              
+              <!-- Empty State (Before Upload) -->
+              <div class="empty-workspace" id="emptyWorkspace">
+                <div class="empty-icon-wrap">
+                  <i class="fa-regular fa-image"></i>
+                </div>
+                <h4 class="empty-title">Ready for image exploration</h4>
+                <p class="empty-text">Select an image from your device or pick a sample card to inspect the interactive thermal comparison.</p>
+                <button type="button" class="btn btn-outline btn-sm" id="emptySampleBtn">
+                  <i class="fa-solid fa-sparkles"></i> Try Sample Image
+                </button>
+              </div>
+
+              <!-- Processing Loading Overlay -->
+              <div class="processing-overlay hidden" id="processingOverlay">
+                <div class="processing-modal">
+                  <div class="spinner-editorial"></div>
+                  <h4 class="processing-title">Enhancing your image...</h4>
+                  <p class="processing-subtitle" id="processingStepText">Balancing contrast and removing sensor noise</p>
+                  
+                  <div class="processing-steps-list">
+                    <div class="step-line" id="stepUpload"><span class="step-bullet"></span> Uploading thermal capture</div>
+                    <div class="step-line" id="stepPreprocess"><span class="step-bullet"></span> Enhancing local contrast (CLAHE)</div>
+                    <div class="step-line" id="stepColorize"><span class="step-bullet"></span> Generating color representation</div>
+                    <div class="step-line" id="stepPostprocess"><span class="step-bullet"></span> Refining edge sharpness</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- View 1: Before / After Split Slider -->
+              <div class="slider-container hidden" id="splitSliderView">
+                <div class="comparison-stage" id="comparisonStage">
+                  
+                  <!-- Background Image (Enhanced) -->
+                  <div class="stage-image-wrap enhanced-wrap">
+                    <img id="imgEnhanced" alt="Enhanced thermal output" src="">
+                    <span class="image-pill-label right">ENHANCED</span>
+                  </div>
+
+                  <!-- Foreground Clipped Image (Original) -->
+                  <div class="stage-image-wrap original-wrap" id="sliderOverlay">
+                    <img id="imgOriginal" alt="Original thermal input" src="">
+                    <span class="image-pill-label left">ORIGINAL</span>
+                  </div>
+
+                  <!-- Draggable Divider Handle -->
+                  <div class="slider-handle" id="sliderHandle" role="slider" aria-label="Image comparison divider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" tabindex="0">
+                    <div class="handle-line"></div>
+                    <div class="handle-button">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                      </svg>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                      </svg>
+                    </div>
+                    <div class="handle-line"></div>
+                  </div>
+
+                </div>
+                
+                <div class="slider-helper-hint">
+                  <i class="fa-solid fa-arrows-left-right"></i> Drag slider or swipe horizontally to compare
+                </div>
+              </div>
+
+              <!-- View 2: Side-by-Side Dual View -->
+              <div class="side-by-side-container hidden" id="sideBySideView">
+                <div class="side-panel">
+                  <div class="side-panel-header">
+                    <span class="panel-tag">Original Thermal</span>
+                    <span class="panel-meta" id="sideMetaOriginal">Grayscale IR</span>
+                  </div>
+                  <div class="side-panel-img-box">
+                    <img id="sideImgOriginal" alt="Original thermal side-by-side" src="">
+                  </div>
+                </div>
+
+                <div class="side-panel">
+                  <div class="side-panel-header">
+                    <span class="panel-tag tag-accent">Enhanced &amp; Colorized</span>
+                    <span class="panel-meta" id="sideMetaEnhanced">Post-Processed</span>
+                  </div>
+                  <div class="side-panel-img-box">
+                    <img id="sideImgEnhanced" alt="Enhanced thermal side-by-side" src="">
+                  </div>
+                </div>
+              </div>
+
+              <!-- View 3: 4-Stage Pipeline Breakdown -->
+              <div class="pipeline-grid-container hidden" id="pipelineView">
+
+                <!-- Stage 1 -->
+                <div class="pipeline-card stage-1">
+                  <div class="pipeline-card-header">
+                    <span class="step-number">01</span>
+                    <span class="step-name">Raw Input</span>
+                    <span class="step-badge">IR</span>
+                  </div>
+                  <div class="pipeline-img-wrap">
+                    <img id="pipelineImg1" alt="Raw Input Thermal" src="">
+                  </div>
+                  <div class="pipeline-card-footer">
+                    <i class="fa-solid fa-temperature-high"></i>
+                    <span>Single-channel thermal</span>
+                  </div>
+                </div>
+
+                <!-- Stage 2 -->
+                <div class="pipeline-card stage-2">
+                  <div class="pipeline-card-header">
+                    <span class="step-number">02</span>
+                    <span class="step-name">Enhanced Contrast</span>
+                    <span class="step-badge">PRE</span>
+                  </div>
+                  <div class="pipeline-img-wrap">
+                    <img id="pipelineImg2" alt="CLAHE Preprocessed" src="">
+                  </div>
+                  <div class="pipeline-card-footer">
+                    <i class="fa-solid fa-sliders"></i>
+                    <span>CLAHE &bull; Bilateral filter</span>
+                  </div>
+                </div>
+
+                <!-- Stage 3 -->
+                <div class="pipeline-card stage-3">
+                  <div class="pipeline-card-header">
+                    <span class="step-number">03</span>
+                    <span class="step-name">AI Colorization</span>
+                    <span class="step-badge">AI</span>
+                  </div>
+                  <div class="pipeline-img-wrap">
+                    <img id="pipelineImg3" alt="Colorized Output" src="">
+                  </div>
+                  <div class="pipeline-card-footer">
+                    <i class="fa-solid fa-brain"></i>
+                    <span>Pix2Pix U-Net</span>
+                  </div>
+                </div>
+
+                <!-- Stage 4 -->
+                <div class="pipeline-card stage-4 highlight-card">
+                  <div class="pipeline-card-header">
+                    <span class="step-number">04</span>
+                    <span class="step-name">Final Output</span>
+                    <span class="step-badge final-badge">OUT</span>
+                  </div>
+                  <div class="pipeline-img-wrap">
+                    <img id="pipelineImg4" alt="Final Sharpened" src="">
+                  </div>
+                  <div class="pipeline-card-footer">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <span>Unsharp Mask Output</span>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
+            <!-- Image Details & Metrics Bar -->
+            <div class="metrics-summary-bar hidden" id="metricsBar">
+              <div class="metric-card">
+                <span class="metric-label">Processing Time</span>
+                <span class="metric-value" id="valLatency">1.24 <span class="unit">s</span></span>
+                <span class="metric-sub" id="valLatencySub">Fast Pipeline</span>
+              </div>
+
+              <div class="metric-card">
+                <span class="metric-label">Image Resolution</span>
+                <span class="metric-value" id="valResolution">640 &times; 480</span>
+                <span class="metric-sub" id="valFormat">PNG Format</span>
+              </div>
+
+              <div class="metric-card">
+                <span class="metric-label">Sharpness Gain</span>
+                <span class="metric-value metric-gain" id="valSharpnessDelta">+148%</span>
+                <span class="metric-sub" id="valTenengradScore">Tenengrad Gradient</span>
+              </div>
+
+              <div class="metric-card">
+                <span class="metric-label">Dynamic Contrast (RMS)</span>
+                <span class="metric-value" id="valRmsContrast">0.42</span>
+                <span class="metric-sub" id="valRmsDelta">+64% dynamic range</span>
+              </div>
+
+              <div class="metric-card">
+                <span class="metric-label">Entropy (Information)</span>
+                <span class="metric-value" id="valEntropy">7.4 <span class="unit">bits</span></span>
+                <span class="metric-sub">Detail distribution</span>
+              </div>
+
+              <div class="metric-card metric-card-reference">
+                <span class="metric-label">PSNR / SSIM</span>
+                <span class="metric-value-muted" id="valPsnr">Reference required</span>
+                <span class="metric-sub" id="valPsnrNote">Requires paired RGB reference</span>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  </section>
+
+  <!-- How It Works Section -->
+  <section class="how-it-works-section" id="howItWorks">
+    <div class="section-container">
+      <div class="section-header-compact">
+        <span class="section-kicker">Simple Workflow</span>
+        <h2 class="section-heading">How thermal enhancement works</h2>
+        <p class="section-desc">Transform low-contrast infrared captures into clear, interpretable imagery in four steps.</p>
+      </div>
+
+      <div class="steps-grid">
+        
+        <div class="step-card">
+          <div class="step-badge">01</div>
+          <div class="step-icon-box">
+            <i class="fa-solid fa-cloud-arrow-up"></i>
+          </div>
+          <h3 class="step-title">Upload</h3>
+          <p class="step-text">Choose or capture any single-channel thermal infrared image from standard or radiometric sensors.</p>
+        </div>
+
+        <div class="step-card">
+          <div class="step-badge">02</div>
+          <div class="step-icon-box">
+            <i class="fa-solid fa-sliders"></i>
+          </div>
+          <h3 class="step-title">Enhance</h3>
+          <p class="step-text">Contrast is balanced adaptively across local regions while sensor noise is smoothed without blurring edges.</p>
+        </div>
+
+        <div class="step-card">
+          <div class="step-badge">03</div>
+          <div class="step-icon-box">
+            <i class="fa-solid fa-palette"></i>
+          </div>
+          <h3 class="step-title">Colorize</h3>
+          <p class="step-text">Grayscale thermal luminance is mapped into visible spectrum hues to highlight subtle temperature gradients.</p>
+        </div>
+
+        <div class="step-card">
+          <div class="step-badge">04</div>
+          <div class="step-icon-box">
+            <i class="fa-solid fa-eye"></i>
+          </div>
+          <h3 class="step-title">Compare</h3>
+          <p class="step-text">Explore the original and enhanced versions side-by-side with an interactive comparison slider.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Explore Results (Pinterest-inspired Masonry Gallery) -->
+  <section class="gallery-section" id="gallerySection">
+    <div class="section-container">
+      
+      <div class="gallery-header-row">
+        <div>
+          <span class="section-kicker">Visual Discovery</span>
+          <h2 class="section-heading">Explore Thermal Gallery</h2>
+          <p class="section-desc">Sample captures across surveillance, diagnostics, wildlife, and architecture.</p>
+        </div>
+
+        <div class="gallery-filters" role="tablist">
+          <button type="button" class="filter-pill active" data-filter="all">All Scenes</button>
+          <button type="button" class="filter-pill" data-filter="Satellite">Satellite / Urban</button>
+          <button type="button" class="filter-pill" data-filter="Agri">Agriculture</button>
+          <button type="button" class="filter-pill" data-filter="Hydrological">Coastal / Water</button>
+          <button type="button" class="filter-pill" data-filter="Geological">Geological</button>
+          <button type="button" class="filter-pill" data-filter="Defense">Defense / Aerial</button>
+        </div>
+      </div>
+
+      <!-- Pinterest-style Masonry Grid -->
+      <div class="masonry-grid" id="masonryGallery">
+        <!-- Dynamically populated by app.js -->
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Technical Details Section (Expandable Accordion) -->
+  <section class="tech-section" id="techDetails">
+    <div class="section-container">
+      
+      <div class="tech-accordion-card">
+        <button type="button" class="tech-accordion-header" id="techAccordionBtn" aria-expanded="false">
+          <div class="tech-title-group">
+            <i class="fa-solid fa-microchip"></i>
+            <div>
+              <h3 class="tech-heading">Technical Pipeline Details</h3>
+              <p class="tech-subheading">Preprocessing algorithms, colorization models, and mathematical validation metrics</p>
+            </div>
+          </div>
+          <span class="tech-toggle-icon">
+            <i class="fa-solid fa-chevron-down" id="techChevron"></i>
+          </span>
+        </button>
+
+        <div class="tech-accordion-body hidden" id="techAccordionBody">
+          <div class="tech-columns-grid">
+            
+            <div class="tech-item">
+              <span class="tech-item-num">01</span>
+              <h4 class="tech-item-title">Preprocessing</h4>
+              <p class="tech-item-desc">
+                <strong>CLAHE (Contrast Limited Adaptive Histogram Equalization)</strong> partitions the thermal image into contextual tiles to prevent over-amplification of noise while balancing wide dynamic range. <strong>Bilateral Filtering</strong> denoises smooth thermal regions while preserving sharp gradient boundaries.
+              </p>
+            </div>
+
+            <div class="tech-item">
+              <span class="tech-item-num">02</span>
+              <h4 class="tech-item-title">Colorization</h4>
+              <p class="tech-item-desc">
+                Converts preprocessed infrared intensity into chromatic channels. In local mode, scientific pseudocolor palettes map thermal radiometry intuitively. In cloud mode, deep exemplar colorization infers natural perceptual colors.
+              </p>
+            </div>
+
+            <div class="tech-item">
+              <span class="tech-item-num">03</span>
+              <h4 class="tech-item-title">Post-Processing</h4>
+              <p class="tech-item-desc">
+                <strong>Unsharp Masking</strong> is applied specifically to the luminance channel in LAB color space, accentuating high-frequency boundary contours without introducing color fringing or chromatic artifacts.
+              </p>
+            </div>
+
+            <div class="tech-item">
+              <span class="tech-item-num">04</span>
+              <h4 class="tech-item-title">Evaluation Metrics</h4>
+              <p class="tech-item-desc">
+                Quality is verified without reference bias using <strong>Tenengrad Gradient Sharpness</strong>, <strong>Shannon Information Entropy</strong>, <strong>Root-Mean-Square Contrast</strong>, and the <strong>Edge Preservation Index (EPI)</strong>. Paired full-reference PSNR/SSIM is computed when ground-truth RGB is supplied.
+              </p>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Clean Minimal Footer -->
+  <footer class="site-footer">
+    <div class="footer-container">
+      <div class="footer-brand">
+        <span class="brand-icon-sm">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M12 2a7 7 0 0 0 7 7c0 5-7 13-7 13S5 14 5 9a7 7 0 0 1 7-7z"></path>
+          </svg>
+        </span>
+        <span class="footer-title">THERMAL VISION</span>
+      </div>
+
+      <p class="footer-copy">Designed for clear thermal image exploration and scientific inspection.</p>
+
+      <div class="footer-links">
+        <a href="#workspaceSection">Workspace</a>
+        <a href="#howItWorks">How it works</a>
+        <a href="#gallerySection">Gallery</a>
+        <a href="#techDetails">Technical Specs</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+  <!-- Zoom Modal -->
+  <div class="zoom-modal hidden" id="zoomModal">
+    <div class="zoom-modal-backdrop" id="zoomModalBackdrop"></div>
+    <div class="zoom-modal-content">
+      <button type="button" class="zoom-close-btn" id="zoomCloseBtn" aria-label="Close modal">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+      <img id="zoomModalImg" alt="Enlarged thermal preview" src="">
+      <div class="zoom-caption" id="zoomCaption">Enhanced Thermal Output</div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
