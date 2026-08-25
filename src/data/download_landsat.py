@@ -1,7 +1,8 @@
 """
 Landsat Collection 2 Level-2 Dataset Acquisition & Preparation Module.
 
-Handles downloading, generating, and preparing authentic Landsat 8/9 Level-2 GeoTIFF scenes:
+Handles downloading from Microsoft Planetary Computer STAC API or generating authentic
+Landsat 8/9 Level-2 GeoTIFF scenes:
 - Surface Temperature Band 10 (*_ST_B10.TIF)
 - Surface Reflectance Band 4 (*_SR_B4.TIF)
 - Surface Reflectance Band 3 (*_SR_B3.TIF)
@@ -13,11 +14,13 @@ Applies USGS radiometric calibration, scene-level dataset splitting, and extract
 
 import os
 import glob
+import json
 import logging
 import argparse
 from typing import List, Dict, Tuple, Optional, Any
 import numpy as np
 import cv2
+import requests
 
 try:
     import rasterio
@@ -25,6 +28,13 @@ try:
     HAS_RASTERIO = True
 except ImportError:
     HAS_RASTERIO = False
+
+try:
+    import pystac_client
+    import planetary_computer
+    HAS_PLANETARY_COMPUTER = True
+except ImportError:
+    HAS_PLANETARY_COMPUTER = False
 
 from src.data.calibrate import (
     LANDSAT_ST_SCALE,
@@ -36,6 +46,113 @@ from src.data.landsat_loader import load_landsat_scene, LandsatScene
 from src.data.patch_extractor import build_scene_level_dataset
 
 logger = logging.getLogger("ps10.data.download")
+
+PLANETARY_COMPUTER_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
+LANDSAT_COLLECTION_ID = "landsat-c2-l2"
+
+# STAC Asset key to local band file mapping
+STAC_BAND_ASSET_MAP = {
+    "ST_B10": ("lwir11", "ST_B10.TIF"),
+    "SR_B4": ("red", "SR_B4.TIF"),
+    "SR_B3": ("green", "SR_B3.TIF"),
+    "SR_B2": ("blue", "SR_B2.TIF"),
+}
+
+
+def search_planetary_computer_scenes(
+    bbox: Optional[List[float]] = None,
+    datetime_range: str = "2023-01-01/2023-12-31",
+    max_cloud_cover: float = 10.0,
+    limit: int = 4
+) -> List[Any]:
+    """
+    Queries Microsoft Planetary Computer STAC API for Landsat Collection 2 Level-2 items.
+
+    Args:
+        bbox: Bounding box [min_lon, min_lat, max_lon, max_lat].
+        datetime_range: ISO8601 date range string (e.g., '2023-01-01/2023-12-31').
+        max_cloud_cover: Maximum acceptable cloud cover percentage (0-100).
+        limit: Maximum number of STAC scenes to retrieve.
+
+    Returns:
+        List of signed STAC Items.
+    """
+    if not HAS_PLANETARY_COMPUTER:
+        logger.warning("pystac-client or planetary-computer is not installed. Unable to search STAC API.")
+        return []
+
+    try:
+        catalog = pystac_client.Client.open(
+            PLANETARY_COMPUTER_STAC_URL,
+            modifier=planetary_computer.sign_inplace
+        )
+        search_params: Dict[str, Any] = {
+            "collections": [LANDSAT_COLLECTION_ID],
+            "datetime": datetime_range,
+            "query": {"eo:cloud_cover": {"lt": max_cloud_cover}},
+            "max_items": limit,
+        }
+        if bbox is not None:
+            search_params["bbox"] = bbox
+
+        search = catalog.search(**search_params)
+        items = list(search.items())
+        logger.info(f"Found {len(items)} Landsat scenes from Planetary Computer STAC matching query.")
+        return items
+    except Exception as e:
+        logger.error(f"Planetary Computer STAC search failed: {e}")
+        return []
+
+
+def download_landsat_stac_scene(
+    item: Any,
+    output_dir: str,
+    scene_id: Optional[str] = None
+) -> Dict[str, str]:
+    """
+    Downloads signed Landsat 8/9 ST and SR GeoTIFF assets from a Planetary Computer STAC Item.
+
+    Args:
+        item: Signed PySTAC Item.
+        output_dir: Destination base directory (e.g., 'data/raw').
+        scene_id: Optional custom identifier for folder naming.
+
+    Returns:
+        band_paths: Dictionary mapping band key ('ST_B10', 'SR_B4', ...) to local GeoTIFF paths.
+    """
+    sid = scene_id or item.id
+    scene_dir = os.path.join(output_dir, sid)
+    os.makedirs(scene_dir, exist_ok=True)
+
+    result_paths = {}
+    for band_key, (asset_name, suffix) in STAC_BAND_ASSET_MAP.items():
+        out_filename = f"{sid}_{suffix}"
+        out_filepath = os.path.join(scene_dir, out_filename)
+
+        if os.path.exists(out_filepath) and os.path.getsize(out_filepath) > 1024:
+            logger.info(f"Band file already exists: {out_filepath}")
+            result_paths[band_key] = out_filepath
+            continue
+
+        asset = item.assets.get(asset_name)
+        if asset is None:
+            raise KeyError(f"Asset '{asset_name}' not present in STAC Item {item.id}")
+
+        signed_href = asset.href
+        logger.info(f"Downloading {band_key} ({asset_name}) -> {out_filepath}...")
+
+        resp = requests.get(signed_href, stream=True, timeout=120)
+        resp.raise_for_status()
+
+        with open(out_filepath, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+
+        result_paths[band_key] = out_filepath
+        logger.info(f"Saved {band_key} to {out_filepath} ({os.path.getsize(out_filepath) / 1e6:.2f} MB)")
+
+    return result_paths
 
 
 def generate_fractal_surface(h: int, w: int, octaves: int = 5, persistence: float = 0.5) -> np.ndarray:
@@ -155,14 +272,12 @@ def create_authentic_landsat_scene(
     b_refl = np.clip(cv2.GaussianBlur(b_refl.astype(np.float32), (3, 3), 0.8), 0.01, 0.95)
 
     # 2. Convert Physical Values to 16-bit USGS Collection 2 DN Integers
-    # ST: Kelvin = DN * 0.00341802 + 149.0 -> DN = (Kelvin - 149.0) / 0.00341802
     dn_st_b10 = np.clip((temp_k - LANDSAT_ST_OFFSET) / LANDSAT_ST_SCALE, 1, 65535).astype(np.uint16)
-    # SR: Refl = DN * 0.0000275 - 0.2 -> DN = (Refl + 0.2) / 0.0000275
     dn_sr_b4 = np.clip((r_refl - LANDSAT_SR_OFFSET) / LANDSAT_SR_SCALE, 1, 65535).astype(np.uint16)
     dn_sr_b3 = np.clip((g_refl - LANDSAT_SR_OFFSET) / LANDSAT_SR_SCALE, 1, 65535).astype(np.uint16)
     dn_sr_b2 = np.clip((b_refl - LANDSAT_SR_OFFSET) / LANDSAT_SR_SCALE, 1, 65535).astype(np.uint16)
 
-    # Add scene nodata boundary edge (simulating satellite swath border)
+    # Add scene nodata boundary edge
     dn_st_b10[:20, :] = 0
     dn_sr_b4[:20, :] = 0
     dn_sr_b3[:20, :] = 0
@@ -204,51 +319,144 @@ def create_authentic_landsat_scene(
 
 
 def download_and_prepare_all_datasets(
+    source: str = "planetary-computer",
     raw_dir: str = "data/raw",
     output_dir: str = "data",
     patch_size: int = 256,
-    stride: int = 128
+    stride: int = 128,
+    datetime_range: str = "2023-01-01/2023-12-31",
+    max_cloud_cover: float = 10.0,
+    limit: int = 4,
+    custom_bbox: Optional[List[float]] = None
 ) -> Dict[str, Any]:
     """
-    Downloads / generates real Landsat Collection 2 Level-2 scenes,
+    Downloads or generates Landsat Collection 2 Level-2 scenes,
     calibrates them with official USGS physical equations,
     and extracts 256x256 paired patches into data/train, data/val, and data/test.
+
+    Args:
+        source: 'planetary-computer' (downloads from STAC) or 'synthetic' (procedural generation).
+        raw_dir: Output folder for full GeoTIFF scenes.
+        output_dir: Destination folder for train/val/test patch splits.
+        patch_size: Square patch dimensions (pixels).
+        stride: Sliding window stride for patch extraction.
+        datetime_range: Date range for STAC search.
+        max_cloud_cover: Maximum cloud coverage percentage.
+        limit: Target scene count.
+        custom_bbox: Optional [min_lon, min_lat, max_lon, max_lat] for custom region.
     """
     os.makedirs(raw_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
 
-    # 4 Representative Landsat 8/9 Scenes (Urban, Agriculture, Coastal, Geothermal)
-    scenes_spec = [
-        ("LC08_L2SP_044034_Urban_SanFrancisco", "urban"),
-        ("LC08_L2SP_015033_Agriculture_CentralValley", "agriculture"),
-        ("LC09_L2SP_028031_Coastal_ChesapeakeBay", "coastal"),
-        ("LC08_L2SP_032037_Geothermal_Yellowstone", "geothermal")
-    ]
-
     loaded_scenes: List[LandsatScene] = []
 
-    for scene_id, stype in scenes_spec:
-        s_dir = os.path.join(raw_dir, scene_id)
-        # Check if bands exist, else create/download
-        st_file = os.path.join(s_dir, f"{scene_id}_ST_B10.TIF")
-        b4_file = os.path.join(s_dir, f"{scene_id}_SR_B4.TIF")
-        b3_file = os.path.join(s_dir, f"{scene_id}_SR_B3.TIF")
-        b2_file = os.path.join(s_dir, f"{scene_id}_SR_B2.TIF")
+    # 1. Attempt Planetary Computer STAC Download if selected
+    if source == "planetary-computer":
+        if not HAS_PLANETARY_COMPUTER:
+            logger.warning(
+                "Planetary Computer / PySTAC libraries not available. Falling back to synthetic authentic scenes."
+            )
+            source = "synthetic"
+        else:
+            logger.info(f"Querying Planetary Computer STAC (cloud_cover < {max_cloud_cover}%, dates: {datetime_range})...")
+            
+            if custom_bbox is not None:
+                target_bboxes = [("Custom_Region", custom_bbox)]
+            else:
+                # Target 4 diverse geographic areas (Urban, Agri, Coastal, Desert/Geothermal)
+                target_bboxes = [
+                    ("Urban_BayArea", [-122.5, 37.5, -122.0, 38.0]),
+                    ("Agriculture_CentralValley", [-120.5, 36.5, -120.0, 37.0]),
+                    ("Coastal_Chesapeake", [-76.5, 37.0, -76.0, 37.5]),
+                    ("Geothermal_Yellowstone", [-111.0, 44.2, -110.3, 44.8]),
+                ]
+            
+            # For a custom bbox, retrieve up to `limit` distinct scenes for that same
+            # region. For the built-in multi-region mode, retrieve one scene per region
+            # until the requested scene count is reached.
+            for region_name, bbox in target_bboxes:
+                if len(loaded_scenes) >= limit:
+                    break
+                try:
+                    remaining = limit - len(loaded_scenes)
+                    query_limit = remaining if custom_bbox is not None else 1
 
-        if not (os.path.exists(st_file) and os.path.exists(b4_file)):
-            create_authentic_landsat_scene(s_dir, scene_id, scene_type=stype, h=1024, w=1024)
+                    items = search_planetary_computer_scenes(
+                        bbox=bbox,
+                        datetime_range=datetime_range,
+                        max_cloud_cover=max_cloud_cover,
+                        limit=query_limit
+                    )
 
-        scene_obj = load_landsat_scene(
-            st_b10_path=st_file,
-            sr_b4_path=b4_file,
-            sr_b3_path=b3_file,
-            sr_b2_path=b2_file,
-            scene_id=scene_id
-        )
-        loaded_scenes.append(scene_obj)
+                    if not items:
+                        logger.warning(f"No Landsat scenes found for region {region_name}.")
+                        continue
+
+                    for item in items:
+                        if len(loaded_scenes) >= limit:
+                            break
+
+                        scene_id = f"{item.id}_{region_name}"
+
+                        # Avoid downloading the same Landsat product twice if a STAC
+                        # search ever returns duplicate items.
+                        if any(sc.scene_id == scene_id for sc in loaded_scenes):
+                            continue
+
+                        logger.info(
+                            f"Downloading STAC scene {len(loaded_scenes) + 1}/{limit}: "
+                            f"{item.id} for region {region_name}..."
+                        )
+
+                        band_paths = download_landsat_stac_scene(
+                            item, raw_dir, scene_id=scene_id
+                        )
+                        scene_obj = load_landsat_scene(
+                            st_b10_path=band_paths["ST_B10"],
+                            sr_b4_path=band_paths["SR_B4"],
+                            sr_b3_path=band_paths["SR_B3"],
+                            sr_b2_path=band_paths["SR_B2"],
+                            scene_id=scene_id
+                        )
+                        loaded_scenes.append(scene_obj)
+
+                except Exception as e:
+                    logger.warning(f"Failed to fetch STAC scenes for region {region_name}: {e}")
+
+    # 2. Fallback to procedural authentic scenes if no STAC scenes were loaded
+    if not loaded_scenes:
+        if source == "planetary-computer":
+            logger.warning("No online STAC scenes acquired. Generating authentic synthetic Landsat scenes...")
+        
+        scenes_spec = [
+            ("LC08_L2SP_044034_Urban_SanFrancisco", "urban"),
+            ("LC08_L2SP_015033_Agriculture_CentralValley", "agriculture"),
+            ("LC09_L2SP_028031_Coastal_ChesapeakeBay", "coastal"),
+            ("LC08_L2SP_032037_Geothermal_Yellowstone", "geothermal")
+        ]
+
+        for scene_id, stype in scenes_spec:
+            s_dir = os.path.join(raw_dir, scene_id)
+            st_file = os.path.join(s_dir, f"{scene_id}_ST_B10.TIF")
+            b4_file = os.path.join(s_dir, f"{scene_id}_SR_B4.TIF")
+            b3_file = os.path.join(s_dir, f"{scene_id}_SR_B3.TIF")
+            b2_file = os.path.join(s_dir, f"{scene_id}_SR_B2.TIF")
+
+            if not (os.path.exists(st_file) and os.path.exists(b4_file)):
+                create_authentic_landsat_scene(s_dir, scene_id, scene_type=stype, h=1024, w=1024)
+
+            scene_obj = load_landsat_scene(
+                st_b10_path=st_file,
+                sr_b4_path=b4_file,
+                sr_b3_path=b3_file,
+                sr_b2_path=b2_file,
+                scene_id=scene_id
+            )
+            loaded_scenes.append(scene_obj)
 
     logger.info(f"Loaded {len(loaded_scenes)} full Landsat scenes for dataset splitting.")
 
+    # 3. Extract Patches and Build Dataset Splits
     manifest = build_scene_level_dataset(
         scenes=loaded_scenes,
         output_base_dir=output_dir,
@@ -264,10 +472,11 @@ def download_and_prepare_all_datasets(
 
     logger.info(
         f"✅ Landsat Dataset Extraction Complete!\n"
+        f"  - Total Scenes:  {len(loaded_scenes)}\n"
         f"  - Total Patches: {manifest.get('total_patches', 0)}\n"
-        f"  - Train Patches: {manifest.get('train_patches', 0)}\n"
-        f"  - Val Patches:   {manifest.get('val_patches', 0)}\n"
-        f"  - Test Patches:  {manifest.get('test_patches', 0)}\n"
+        f"  - Train Patches: {len(manifest.get('splits', {}).get('train', []))}\n"
+        f"  - Val Patches:   {len(manifest.get('splits', {}).get('val', []))}\n"
+        f"  - Test Patches:  {len(manifest.get('splits', {}).get('test', []))}\n"
         f"  - Manifest:      {manifest_path}"
     )
 
@@ -275,11 +484,42 @@ def download_and_prepare_all_datasets(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Download and prepare Landsat scenes for Pix2Pix training")
+    parser = argparse.ArgumentParser(description="Download and prepare Landsat Collection 2 scenes for Pix2Pix training")
+    parser.add_argument(
+        "--source",
+        type=str,
+        default="planetary-computer",
+        choices=["planetary-computer", "synthetic"],
+        help="Source of Landsat scenes: 'planetary-computer' (online STAC) or 'synthetic' (procedural)"
+    )
     parser.add_argument("--raw-dir", type=str, default="data/raw", help="Directory for raw GeoTIFF scenes")
     parser.add_argument("--output-dir", type=str, default="data", help="Directory for train/val/test splits")
+    parser.add_argument("--patch-size", type=int, default=256, help="Square patch size in pixels")
     parser.add_argument("--stride", type=int, default=128, help="Sliding window stride in pixels")
+    parser.add_argument("--date-range", type=str, default="2023-01-01/2023-12-31", help="STAC date range query")
+    parser.add_argument("--max-cloud", type=float, default=10.0, help="Maximum cloud cover percentage")
+    parser.add_argument("--limit", type=int, default=4, help="Maximum number of scenes to acquire")
+    parser.add_argument(
+        "--bbox",
+        type=float,
+        nargs=4,
+        metavar=("MIN_LON", "MIN_LAT", "MAX_LON", "MAX_LAT"),
+        default=None,
+        help="Custom bounding box coordinates [min_lon, min_lat, max_lon, max_lat]"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    download_and_prepare_all_datasets(raw_dir=args.raw_dir, output_dir=args.output_dir, stride=args.stride)
+    download_and_prepare_all_datasets(
+        source=args.source,
+        raw_dir=args.raw_dir,
+        output_dir=args.output_dir,
+        patch_size=args.patch_size,
+        stride=args.stride,
+        datetime_range=args.date_range,
+        max_cloud_cover=args.max_cloud,
+        limit=args.limit,
+        custom_bbox=args.bbox
+    )
+
+    

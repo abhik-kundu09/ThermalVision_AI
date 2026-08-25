@@ -75,17 +75,17 @@ def test_surface_reflectance_calibration_formula():
 
 def test_normalize_thermal_for_gan():
     """Verify thermal normalization maps to [-1.0, 1.0] for Pix2Pix."""
-    # Min temp 260K, max temp 330K
-    kelvin = np.array([[260.0, 295.0, 330.0], [np.nan, 200.0, 400.0]], dtype=np.float32)
+    # Min temp 275K, max temp 325K
+    kelvin = np.array([[275.0, 300.0, 325.0], [np.nan, 200.0, 400.0]], dtype=np.float32)
     mask = np.array([[True, True, True], [False, True, True]], dtype=bool)
 
-    norm = normalize_thermal_for_gan(kelvin, mask, min_temp=260.0, max_temp=330.0)
+    norm = normalize_thermal_for_gan(kelvin, mask, min_temp=275.0, max_temp=325.0)
 
-    # 260K -> -1.0
+    # 275K -> -1.0
     assert pytest.approx(norm[0, 0], abs=1e-3) == -1.0
-    # 295K -> 0.0 (midpoint)
+    # 300K -> 0.0 (midpoint)
     assert pytest.approx(norm[0, 1], abs=1e-3) == 0.0
-    # 330K -> +1.0
+    # 325K -> +1.0
     assert pytest.approx(norm[0, 2], abs=1e-3) == 1.0
     # Invalid / nodata -> -1.0
     assert norm[1, 0] == -1.0
@@ -95,17 +95,19 @@ def test_normalize_thermal_for_gan():
 
 
 def test_normalize_rgb_for_gan():
-    """Verify RGB reflectance normalization maps [0, 1] -> [-1, 1]."""
+    """Verify RGB reflectance normalization maps [0, max_reflectance] -> [-1, 1]."""
     refl = np.zeros((10, 10, 3), dtype=np.float32)
-    refl[:, :, :] = 0.5  # Mid reflectance
+    refl[:, :, :] = 0.15  # Midpoint of [0.0, 0.30]
     mask = np.ones((10, 10), dtype=bool)
 
-    norm_rgb = normalize_rgb_for_gan(refl, mask)
+    norm_rgb = normalize_rgb_for_gan(refl, mask, max_reflectance=0.30)
 
     assert norm_rgb.shape == (10, 10, 3)
+    # 0.15 / 0.30 * 2 - 1 = 0.0
     assert pytest.approx(norm_rgb[0, 0, 0], abs=1e-3) == 0.0
     assert pytest.approx(norm_rgb.min(), abs=1e-3) == 0.0
     assert pytest.approx(norm_rgb.max(), abs=1e-3) == 0.0
+
 
 
 def test_load_landsat_scene_mock():

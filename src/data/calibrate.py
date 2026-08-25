@@ -102,8 +102,8 @@ def calibrate_surface_reflectance(
 def normalize_thermal_for_gan(
     temp_kelvin: np.ndarray,
     valid_mask: np.ndarray,
-    min_temp: float = 260.0,
-    max_temp: float = 330.0
+    min_temp: float = 275.0,
+    max_temp: float = 325.0
 ) -> np.ndarray:
     """
     Normalizes thermal Kelvin array to [-1.0, 1.0] dynamic range for Pix2Pix Generator input.
@@ -111,8 +111,8 @@ def normalize_thermal_for_gan(
     Args:
         temp_kelvin: 2D float32 array in Kelvin.
         valid_mask: 2D boolean array of valid pixels.
-        min_temp: Minimum temperature in Kelvin (mapped to -1.0).
-        max_temp: Maximum temperature in Kelvin (mapped to +1.0).
+        min_temp: Minimum temperature in Kelvin (mapped to -1.0, default 275K / ~2°C).
+        max_temp: Maximum temperature in Kelvin (mapped to +1.0, default 325K / ~52°C).
 
     Returns:
         normalized_thermal: 2D float32 array in [-1.0, 1.0] with nodata pixels filled with -1.0.
@@ -130,20 +130,28 @@ def normalize_thermal_for_gan(
 
 def normalize_rgb_for_gan(
     rgb_reflectance: np.ndarray,
-    valid_mask: np.ndarray
+    valid_mask: np.ndarray,
+    max_reflectance: float = 0.30
 ) -> np.ndarray:
     """
-    Normalizes surface reflectance RGB array from [0.0, 1.0] to [-1.0, 1.0] for Pix2Pix Target.
+    Normalizes surface reflectance RGB array from physical reflectance [0.0, max_reflectance]
+    to [-1.0, 1.0] dynamic range for Pix2Pix Target.
+
+    Earth surface reflectance rarely exceeds 0.30 in visible bands. Scaling by max_reflectance
+    ensures the target imagery utilizes the full dynamic range of the GAN [-1.0, 1.0] rather
+    than being compressed into dark, negative values.
 
     Args:
-        rgb_reflectance: 3D float32 array (H, W, 3) in [0.0, 1.0].
+        rgb_reflectance: 3D float32 array (H, W, 3) in physical reflectance [0.0, 1.0].
         valid_mask: 2D or 3D boolean array of valid pixels.
+        max_reflectance: Reflectance value mapped to +1.0 (default 0.30).
 
     Returns:
         normalized_rgb: 3D float32 array (H, W, 3) in [-1.0, 1.0].
     """
-    clipped = np.clip(rgb_reflectance, 0.0, 1.0)
-    norm_neg1_1 = clipped * 2.0 - 1.0
+    clipped = np.clip(rgb_reflectance, 0.0, max_reflectance)
+    scaled_0_1 = clipped / max_reflectance
+    norm_neg1_1 = scaled_0_1 * 2.0 - 1.0
 
     if valid_mask.ndim == 2:
         norm_neg1_1[~valid_mask] = -1.0
@@ -151,3 +159,4 @@ def normalize_rgb_for_gan(
         norm_neg1_1[~valid_mask] = -1.0
 
     return norm_neg1_1.astype(np.float32)
+
